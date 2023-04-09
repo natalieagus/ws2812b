@@ -2,8 +2,11 @@
 <project name="WS2812B" board="Alchitry Au" language="Lucid" version="3">
   <files>
     <src top="true">au_top.luc</src>
+    <component>pipeline.luc</component>
     <component>reset_conditioner.luc</component>
+    <component>edge_detector.luc</component>
     <src>ws2812b_writer.luc</src>
+    <component>button_conditioner.luc</component>
     <constraint>custom.acf</constraint>
     <constraint lib="true">au.xdc</constraint>
   </files>

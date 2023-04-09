@@ -13,10 +13,23 @@ module au_top (
   ) {
   
   sig rst;                  // reset signal
-
-  const LEDCOLOR = {hFF0000, h00FF00, h0000FF}; // blue for the third LED, red for the second LED, green for the first LED (nearest to the connector)
+  sig start_pixel_address;
+  sig end_pixel_address;
+  const PIXEL_COUNT = 12;   // light up 12 LEDs in the strip
   
-  ws2812b_writer led_strip(#PIXEL_COUNT(3), .clk(clk), .rst(rst)); //set for 3 pixels
+  // WHITE (11), BLUE (10), RED (01), GREEN (00)
+  const LEDCOLOR = {hFFFFFF, hFF0000, h00FF00, h0000FF}; 
+  
+  // (connector) WHITE WHITE BLUE WHITE RED WHITE GREEN WHITE WHITE BLUE BLUE BLUE (end of strip)
+  // e.g: E is 1110 ---> 10 first (BLUE) then 11 (WHITE)
+  dff led_encoding[PIXEL_COUNT*2](.clk(clk), .rst(rst), #INIT(24hABCDEF));
+  dff temp_encoding[PIXEL_COUNT*2](.clk(clk), .rst(rst), #INIT(0));
+  ws2812b_writer led_strip(#PIXEL_COUNT(PIXEL_COUNT), .clk(clk), .rst(rst)); 
+  fsm state(.clk(clk), .rst(rst)) = {IDLE, LOAD};
+  
+  button_conditioner user_button(.clk(clk));
+  edge_detector user_button_edge(.clk(clk));
+  
   .clk(clk) {
     // The reset conditioner is used to synchronize the reset signal to the FPGA
     // clock. This ensures the entire FPGA comes out of reset at the same time.
@@ -35,9 +48,40 @@ module au_top (
     io_seg = 8hff;          // turn segments off
     io_sel = 4hf;           // select no digits
     
+    user_button.in = io_button[0]; // use this button to latch io_dip value to led_encoding dff 
+    user_button_edge.in = user_button.out;
+    
+    // use io_dip[2:0]  to encode 12 pixel values at most (24 bits)
+    case (state.q){
+      state.IDLE:
+             if (user_button.out){
+                temp_encoding.d = c{io_dip[2], io_dip[1], io_dip[0]};
+                state.d = state.LOAD;
+              }
+      
+      state.LOAD:
+            // wait until we are at RESET  state
+            if (led_strip.reset){
+                // load the dff with new value 
+                led_encoding.d = temp_encoding.q;
+                state.d = state.IDLE;
+            }
+    }
 
-    led_strip.update=1; //sample write 
-    led_strip.color=LEDCOLOR[led_strip.pixel_address]; 
+    led_strip.update = 1; // always write
+    
+    // led_strip.pixel_address will vary between 0000 to 1100 
+    // address 0 --> bit 1:0 
+    // address 1 --> bit 3:2 
+    // address 2 --> bit 5:4
+    // address N --> bit N*2+1:N*2
+
+    end_pixel_address = led_strip.pixel_address * 2;
+    start_pixel_address = end_pixel_address + 1;
+    
+    // based on the encoding extracted from dff led_encoding, we get the 24bit color value
+    led_strip.color = LEDCOLOR[led_encoding.q[start_pixel_address:end_pixel_address]]; 
+    
     outled=led_strip.led;
   }
 }

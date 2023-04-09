@@ -11,7 +11,8 @@ module ws2812b_writer #(
     // eg: if you want the color NAVY, you will find that B should be 0x80. This means B7 is 1 and you need to flip it in BINARY for Lucid to work, effectively having 0x01 for BLUE part.
     input color[24],   			// BRG, 8 bits each, color to render for all LED
     output pixel_address[$clog2(PIXEL_COUNT)],  // Index of the LED, with the color in color[24]
-    output led		//Goes to the first LED in the chain
+    output led,		//Goes to the first LED in the chain
+    output reset
 
   ) {
   
@@ -27,6 +28,7 @@ module ws2812b_writer #(
   
   always {
     led = 0;
+    reset = 0; // not resetting by default
     
     pixel_address = pixel_address_ctr.q;
     case (state.q) {
@@ -53,6 +55,7 @@ module ws2812b_writer #(
         }
       
       state.RESET:
+        reset = 1;
         if (&rst_ctr.q) { // if contents of rst_ctr.q is all 1
           if (update) {
             rst_ctr.d = 0;
