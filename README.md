@@ -20,4 +20,4 @@ You should observe **three** LEDs in the strip lit up: one blue, one red, and on
 
 The file `ws2812b_writer.luc` receives 24 bit color input, and 1 bit flag signal to activate or deactivate this LED strip. Each color is encoded in 24bits of data. WS2812B expects the first 8 bits sent to be G, then R (next 8), then B (following next 8).
 
-It outputs `pixel`, which is the address of the current LED that should be receiving the 24 bit input color. It should ideally be connected to a ROM which receives `pixel` as address and outputs 24 bits of value for as long as `pixel` is set constant.
+It outputs `pixel_address`, which is the address of the current LED that should be receiving the 24 bit input color. It should ideally be connected to a ROM which receives `pixel_address` as address and outputs 24 bits of value for as long as `pixel_address` is set constant.

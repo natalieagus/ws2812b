@@ -10,7 +10,7 @@ module ws2812b_writer #(
     // Note that the high bit is B7, and the low bit is B0 for the 8-bit color BLUE (same with red and green)
     // eg: if you want the color NAVY, you will find that B should be 0x80. This means B7 is 1 and you need to flip it in BINARY for Lucid to work, effectively having 0x01 for BLUE part.
     input color[24],   			// BRG, 8 bits each, color to render for all LED
-    output pixel[$clog2(PIXEL_COUNT)],  // Index of the LED, with the color in color[24]
+    output pixel_address[$clog2(PIXEL_COUNT)],  // Index of the LED, with the color in color[24]
     output led		//Goes to the first LED in the chain
 
   ) {
@@ -18,7 +18,7 @@ module ws2812b_writer #(
   .clk(clk) {
     .rst(rst) {
       fsm state = {SEND_PIXEL, RESET};
-      dff pixel_ctr[$clog2(PIXEL_COUNT)];
+      dff pixel_address_ctr[$clog2(PIXEL_COUNT)](#INIT(0));
       dff bit_ctr[5];
       dff ctr[7];
       dff rst_ctr [$clog2(5000)]; //reset requires 50us of zeroes 
@@ -28,7 +28,7 @@ module ws2812b_writer #(
   always {
     led = 0;
     
-    pixel = pixel_ctr.q;
+    pixel_address = pixel_address_ctr.q;
     case (state.q) {
       state.SEND_PIXEL:
         if (color[bit_ctr.q]) //if current bit is HIGH, send 80 1's and 45 0's
@@ -43,10 +43,10 @@ module ws2812b_writer #(
           bit_ctr.d = bit_ctr.q + 1;
           if (bit_ctr.q == 23) { //check if you have sent all 24 bits 
             bit_ctr.d = 0;
-            pixel_ctr.d = pixel_ctr.q + 1;
+            pixel_address_ctr.d = pixel_address_ctr.q + 1;
               
-            if (pixel_ctr.q == PIXEL_COUNT-1) { //check if you have sent data to all LEDs
-              pixel_ctr.d = 0;
+            if (pixel_address_ctr.q == PIXEL_COUNT-1) { //check if you have sent data to all LEDs
+              pixel_address_ctr.d = 0;
               state.d = state.RESET;
             }
           }

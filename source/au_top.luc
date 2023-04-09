@@ -37,7 +37,7 @@ module au_top (
     
 
     led_strip.update=1; //sample write 
-    led_strip.color=LEDCOLOR[led_strip.pixel]; 
+    led_strip.color=LEDCOLOR[led_strip.pixel_address]; 
     outled=led_strip.led;
   }
 }
