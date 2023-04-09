@@ -54,7 +54,7 @@ module au_top (
     // use io_dip[2:0]  to encode 12 pixel values at most (24 bits)
     case (state.q){
       state.IDLE:
-             if (user_button.out){
+             if (user_button_edge.out){
                 temp_encoding.d = c{io_dip[2], io_dip[1], io_dip[0]};
                 state.d = state.LOAD;
               }
