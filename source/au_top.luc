@@ -12,17 +12,19 @@ module au_top (
     input io_dip [3][8]     // DIP switches on IO Shield
   ) {
   
-  sig rst;                  // reset signal
-  sig start_pixel_address;
-  sig end_pixel_address;
   const PIXEL_COUNT = 12;   // light up 12 LEDs in the strip
+  const ENCODING_AMOUNT = 4; // how many different encodings are used?
+  sig rst;                  // reset signal
+  sig transformed_pixel_address[$clog2(PIXEL_COUNT*2)];
+  sig current_color_encoding[$clog2(ENCODING_AMOUNT)];
+
   
   // WHITE (11), BLUE (10), RED (01), GREEN (00)
-  const LEDCOLOR = {hFFFFFF, hFF0000, h00FF00, h0000FF}; 
+  const LEDCOLOR = {24hFFFFFF, 24hFF0000, 24h00FF00, 24h0000FF}; 
   
   // (connector) WHITE WHITE BLUE WHITE RED WHITE GREEN WHITE WHITE BLUE BLUE BLUE (end of strip)
   // e.g: E is 1110 ---> 10 first (BLUE) then 11 (WHITE)
-  dff led_encoding[PIXEL_COUNT*2](.clk(clk), .rst(rst), #INIT(24hABCDEF));
+  dff led_encoding[PIXEL_COUNT*2](.clk(clk), .rst(rst), #INIT(24hABCDEF)); // 2 bit to encode a color 
   dff temp_encoding[PIXEL_COUNT*2](.clk(clk), .rst(rst), #INIT(0));
   ws2812b_writer led_strip(#PIXEL_COUNT(PIXEL_COUNT), .clk(clk), .rst(rst)); 
   fsm state(.clk(clk), .rst(rst)) = {IDLE, LOAD};
@@ -76,12 +78,19 @@ module au_top (
     // address 2 --> bit 5:4
     // address N --> bit N*2+1:N*2
 
-    end_pixel_address = led_strip.pixel_address * 2;
-    start_pixel_address = end_pixel_address + 1;
+    transformed_pixel_address = led_strip.pixel_address * 2;
+    
+    // need to manually handle the encoding bit one by one for now
+    // TODO: use a for-loop to DUPLICATE
+    current_color_encoding[0] = led_encoding.q[transformed_pixel_address];
+    current_color_encoding[1] = led_encoding.q[transformed_pixel_address+1];
     
     // based on the encoding extracted from dff led_encoding, we get the 24bit color value
-    led_strip.color = LEDCOLOR[led_encoding.q[start_pixel_address:end_pixel_address]]; 
-    
+    led_strip.color = LEDCOLOR[current_color_encoding] ; 
     outled=led_strip.led;
+    
+    // debug 
+    // show the current LED color
+    io_led = $build(LEDCOLOR[current_color_encoding],3);
   }
 }
