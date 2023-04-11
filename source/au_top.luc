@@ -147,7 +147,6 @@ module au_top (
     // address 2 --> encoding bit 5
     // address N --> encoding bit N*2+1:N*2
     
-    // TEST
     if (matrix_used.q){ // if we decide to flip the leftmost bit, we reverse every other row
       // reverse every other row
       encoded_pixel_address = reversed_pixel_address * 2;

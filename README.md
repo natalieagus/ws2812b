@@ -10,22 +10,34 @@ Upon compilation, connect the `DIN` pin of WS2812B to Br pin `C49`, as defined i
 pin outled C49;
 ```
 
-You should observe **12** LEDs in the strip lit up in the following color:
+You should observe **24** LEDs in the strip lit up in the following color. If your strip is just of length `N`, then you shall see only the first `N` colors.
 
 ```
   (connector) WHITE WHITE BLUE WHITE RED WHITE GREEN WHITE WHITE BLUE BLUE BLUE (end of strip)
 ```
 
-You can use `io_dip` to **color encode** 12 pixels and then by pressiong `io_button[0]` (up button) on io shield to **register** and see the effect on the LED strip. For instance, if your dip switches is put as follows (left to right):
+You can use `io_dip` to **color encode** 16 pixels and then by pressing `io_button[0]` (up button) on io shield to **register** and see the effect on the LED strip. For instance, if your dip switches is put as follows (left to right):
 
 ```
 11110000 01011010 00001100
 ```
 
+The value of `io_dip[2]` will be concatenated twice at the end to form 32 bit input (you can see this at `au_top`):
+
+```
+temp_encoding.d = 16x{c{io_dip[2], io_dip[2], io_dip[1], io_dip[0]}};
+```
+
+For instance, the above setup yields the following to be loaded to the LED strip:
+
+```
+11110000 11110000 01011010 00001100
+```
+
 It will light up the LED in this color:
 
 ```
-  (connector) GREEN WHITE GREEN GREEN BLUE BLUE RED RED GREEN GREEN WHITE WHITE (end of strip)
+  (connector) GREEN WHITE GREEN GREEN BLUE BLUE RED RED GREEN GREEN WHITE WHITE GREEN GREEN WHITE WHITE (end of strip)
 ```
 
 This is due to this encoding:
@@ -38,19 +50,77 @@ This is due to this encoding:
 We basically segments the color encoding as dictated by `io_dip` in groups of two bits, e.g:
 
 ```
-11 11 00 00 01 01 10 10 00 00 11 00
+11 11 00 00 11 11 00 00 01 01 10 10 00 00 11 00
 ```
 
-and each encoding corresponds to 24-bit color, so we actually have the following being pumped into the writer.
+and each encoding corresponds to 24-bit color, pumped from **right** to **left**, group by group (2bit ---> 24bit) at a time.
+
+### Connect to WS2812B matrix
+
+A matrix is essentially a long strip with reversed index every other odd row, something like this for a 16 by 16.
 
 ```
-24hFFFFFF 24hFFFFFF 24h0000FF 24h0000FF 24h00FF00 24h00FF00  24hFF0000 24hFF0000 24h0000FF 24h000000
+15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
+16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+...
 ```
+
+Hence we shall reverse the physical index accordingly every other row. This can be found at `au_top`:
+
+```
+    if  (&led_strip.pixel_address[COLUMN_DIMENSION_BITS-1:0] & led_strip.next_pixel){
+      reverse.d = reverse.q + 1; // toggle the reverse flag, test 1
+    }
+
+    if (reverse.q)
+    {
+       reversed_pixel_address = led_strip.pixel_address ^ c{HIGHER_BITSx{b0},COLUMN_DIMENSION_BITSx{b1}}; // higher bits stays the same
+      // reversed_pixel_address = 0; // test color at 0 which is 11 --> white
+     }
+    else
+    {
+      reversed_pixel_address = led_strip.pixel_address;
+    }
+```
+
+And then find the encoded bits as usual:
+
+```
+    if (matrix_used.q){ // if we decide to flip the leftmost bit, we reverse every other row
+      // reverse every other row
+      encoded_pixel_address = reversed_pixel_address * 2;
+    }
+    else{
+      // don't reverse every other row
+      encoded_pixel_address = led_strip.pixel_address * 2;
+    }
+
+
+    // get current color encoding for this pixel
+    for (index=0; index<$clog2(ENCODING_AMOUNT); index++){
+       current_color_encoding[index] = led_encoding.q[encoded_pixel_address+index];
+    }
+```
+
+To witness this, load the binary to a WS2812B LED matrix and press `io_button[1]`, then **refresh** with `io_button[0]`. You should see all the color displayed from "left to right" instead of snaking around.
+
+Before:
+![before](images/before.png)
+
+After:
+![after](images/after.png)
 
 ## Usage
 
-The file `ws2812b_writer.luc` receives 24 bit color input, and 1 bit flag signal to activate or deactivate this LED strip. Each color is encoded in 24bits of data. WS2812B expects the first 8 bits sent to be G, then R (next 8), then B (following next 8).
+The file `ws2812b_writer.luc` receives 24 bit color input, and 1 bit signal `update` to refresh the LEDs or leave this LED strip alone and display the previous value. Each color is encoded in 24bits of data. WS2812B expects the first 8 bits sent to be G, then R (next 8), then B (following next 8).
+
+It also receives a `clear` signal to "OFF" all LEDs regardless of `update`. If **both** update and clear is 1, then **clear** will take priority.
+
+<span style="color:red; font-weight: bold;">Note that each of the "bit" in the 24 bit color input is not a regular digital bit sent per one FPGA clock cycle. It has it's own required encoding to send all these 24 "bits", which amounts to 125 FPGA clock cycle for each bit</span>. **Read** the datasheet!
 
 It outputs `pixel_address`, which is the address of the current LED that should be receiving the 24 bit input color. It should ideally be connected to a ROM which receives `pixel_address` as address and outputs 24 bits of value for as long as `pixel_address` is set constant.
 
 It also outputs `reset` flag, which is `1` when the writer is at the `RESET` state. When `reset == 1`, we change the `color` input to the writer so that it can display a fresh new set of value to to the LEDs.
+
+Finally, it outputs a helper bit `next_pixel` that will be `1` for exactly 1 FPGA clock cycle if we are currently sending the **last** FPGA clock cycle of the 24-bit color.
