@@ -17,6 +17,7 @@ module au_top (
   sig rst;                  // reset signal
   sig transformed_pixel_address[$clog2(PIXEL_COUNT*2)];
   sig current_color_encoding[$clog2(ENCODING_AMOUNT)];
+  var index;
 
   
   // WHITE (11), BLUE (10), RED (01), GREEN (00)
@@ -75,15 +76,19 @@ module au_top (
     // led_strip.pixel_address will vary between 0000 to 1100 
     // address 0 --> bit 1:0 
     // address 1 --> bit 3:2 
-    // address 2 --> bit 5:4
+    // address 2 --> bit 5
     // address N --> bit N*2+1:N*2
 
     transformed_pixel_address = led_strip.pixel_address * 2;
     
     // need to manually handle the encoding bit one by one for now
     // TODO: use a for-loop to DUPLICATE
-    current_color_encoding[0] = led_encoding.q[transformed_pixel_address];
-    current_color_encoding[1] = led_encoding.q[transformed_pixel_address+1];
+    for (index=0; index<$clog2(ENCODING_AMOUNT); index++){
+       current_color_encoding[index] = led_encoding.q[transformed_pixel_address+index];
+    }
+    
+    // current_color_encoding[0] = led_encoding.q[transformed_pixel_address];
+    // current_color_encoding[1] = led_encoding.q[transformed_pixel_address+1];
     
     // based on the encoding extracted from dff led_encoding, we get the 24bit color value
     led_strip.color = LEDCOLOR[current_color_encoding] ; 
@@ -92,5 +97,8 @@ module au_top (
     // debug 
     // show the current LED color
     io_led = $build(LEDCOLOR[current_color_encoding],3);
+    
+
+    
   }
 }
