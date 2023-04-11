@@ -96,7 +96,9 @@ module au_top (
     
     // debug 
     // show the current LED color
-    io_led = $build(LEDCOLOR[current_color_encoding],3);
+    io_led[0] = LEDCOLOR[current_color_encoding][7:0];
+    io_led[1] = LEDCOLOR[current_color_encoding][15:8];
+    io_led[2] = LEDCOLOR[current_color_encoding][23:16];
     
 
     
