@@ -15,17 +15,13 @@ module au_top (
   // We shall always assume that COLUMN_DIMENSION and ROW_DIMENSION is a 2^x
   const COLUMN_DIMENSION = 16; // how many "columns"? 
   const ROW_DIMENSION = 4; // how many "rows"?
-  const COLUMN_DIMENSION_BITS = $clog2(COLUMN_DIMENSION); // number of bits needed to represent which column we are currently at
 
-  
   const PIXEL_COUNT = COLUMN_DIMENSION *  ROW_DIMENSION;   
-  const HIGHER_BITS = $clog2(PIXEL_COUNT) - COLUMN_DIMENSION_BITS;
   const ENCODING_AMOUNT = 4; // how many different encodings are used? As example, we use 4
   
   sig rst; // reset signal
   sig encoded_pixel_address[$clog2(PIXEL_COUNT)*$clog2(ENCODING_AMOUNT)];
   sig current_color_encoding[$clog2(ENCODING_AMOUNT)];
-  sig reversed_pixel_address[$clog2(PIXEL_COUNT)]; // reverse every other row for ws2812b matrices
 
   var index;
 
@@ -42,8 +38,7 @@ module au_top (
   ws2812b_writer led_strip(#PIXEL_COUNT(PIXEL_COUNT), .clk(clk), .rst(rst)); 
   fsm state(.clk(clk), .rst(rst)) = {IDLE, LOAD};
   
-  // helper bits to reverse every other row if we are using ws2812b matrix
-  dff reverse(.clk(clk), .rst(rst), #INIT(0));
+  reverser index_reverser(.clk(clk), .rst(rst), #COLUMN_DIMENSION(COLUMN_DIMENSION), #ROW_DIMENSION(ROW_DIMENSION));
   
   // user inputs 
   button_conditioner latch_button(.clk(clk));
@@ -52,6 +47,8 @@ module au_top (
   edge_detector clear_button_edge(.clk(clk), #RISE(1), #FALL(0));
   button_conditioner reverse_button(.clk(clk));
   edge_detector reverse_button_edge(.clk(clk), #RISE(1), #FALL(0));
+  
+  // a state to toggle revere 
   dff matrix_used(#INIT(0), .clk(clk), .rst(rst));
   
   .clk(clk) {
@@ -89,37 +86,7 @@ module au_top (
     led_strip.update = 0; // do not refresh by default
     led_strip.clear = 0; // do not clear by default
     
-    // EXAMPLE: 16x16 ws2812b matrix transformation logic
-    // pixel 0 to 15 is not reversed, reverse.q == 0, current_row.q == 0
-    // pixel 16 to 31 is reversed, becomes 31 to 16, reverse.q == 1, current_row.q == 1
-    // 16 ---> 31
-    // 17 ---> 30 
-    // 31 ---> 16 
-    // pixel 32 to 47 is not reversed, reverse.q == 0, current_row.q == 2
-    // pixel 48 to 63 is reversed, reverse.q == 1, current_row.q == 3
-    // 48 ---> 63 
-    // 49 ---> 62 
-    // and so on
-    // we can do this by keeping the higher bit, and do a 1s complement of the lower COLUMN_DIMENSION bits (bitwise XOR with 1)
-    
-    // check if we are a multiple of DIMENSION 
-    // here in our example, we have column 0 to 15
-    // so each time the last four bit our pixel_address is 1111, we will reverse the row addressing
-    // when address turns 1111, we can't just change the encoding right away, we need to wait for it to finish loading first, all 24 bits sent
-    if  (&led_strip.pixel_address[COLUMN_DIMENSION_BITS-1:0] & led_strip.next_pixel){
-      reverse.d = reverse.q + 1; // toggle the reverse flag, test 1
-    }
-    
-    if (reverse.q)
-    {
-       reversed_pixel_address = led_strip.pixel_address ^ c{HIGHER_BITSx{b0},COLUMN_DIMENSION_BITSx{b1}}; // higher bits stays the same 
-      // reversed_pixel_address = 0; // test color at 0 which is 11 --> white
-     }
-    else
-    {
-      reversed_pixel_address = led_strip.pixel_address;
-    }
-    
+
     // use io_dip[2:0]  to encode 12 unique pixel values at most (24 bits)
     case (state.q){
       state.IDLE:
@@ -141,23 +108,20 @@ module au_top (
             }
     }
     
+    // connect reverser to led_strip 
+    index_reverser.original_pixel_address = led_strip.pixel_address;
+    index_reverser.writer_pixel_done = led_strip.next_pixel;
+    index_reverser.activate = matrix_used.q;
+    encoded_pixel_address = index_reverser.effective_pixel_address;
+    
     // led_strip.pixel_address will vary between 0000 to 1100 
     // address 0 --> encoding bit 1:0 
     // address 1 --> encoding bit 3:2 
     // address 2 --> encoding bit 5
     // address N --> encoding bit N*2+1:N*2
     
-    if (matrix_used.q){ // if we decide to flip the leftmost bit, we reverse every other row
-      // reverse every other row
-      encoded_pixel_address = reversed_pixel_address * 2;
-    }
-    else{
-      // don't reverse every other row 
-      encoded_pixel_address = led_strip.pixel_address * 2;
-    }
-    
  
-    // get current color encoding for this pixel
+   // get current color encoding for this pixel
     for (index=0; index<$clog2(ENCODING_AMOUNT); index++){
        current_color_encoding[index] = led_encoding.q[encoded_pixel_address+index];
     }
@@ -171,9 +135,9 @@ module au_top (
     io_led[0] = led_encoding.q[7:0];
     io_led[1] = led_encoding.q[15:8];
     io_led[2] = led_encoding.q[23:16];
-    led[0] = reverse.q;
-    led[1] = matrix_used.q; 
-    led[7:2] = led_strip.pixel_address;
+   
+    led[0] = matrix_used.q; 
+    led[7:1] = led_strip.pixel_address;
     
 
     

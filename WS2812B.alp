@@ -6,6 +6,7 @@
     <component>reset_conditioner.luc</component>
     <component>edge_detector.luc</component>
     <src>ws2812b_writer.luc</src>
+    <src>reverser.luc</src>
     <component>button_conditioner.luc</component>
     <constraint>custom.acf</constraint>
     <constraint lib="true">au.xdc</constraint>
