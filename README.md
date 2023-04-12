@@ -66,41 +66,65 @@ A matrix is essentially a long strip with reversed index every other odd row, so
 ...
 ```
 
-Hence we shall reverse the physical index accordingly every other row. This can be found at `au_top`:
+Hence we shall reverse the physical index accordingly every other row. This can be found at `reverser.luc`:
 
 ```
-    if  (&led_strip.pixel_address[COLUMN_DIMENSION_BITS-1:0] & led_strip.next_pixel){
+    // check if we are a multiple of DIMENSION 
+    // here in our example, we have column 0 to 15
+    // so each time the last four bit our pixel_address is 1111, we will reverse the row addressing
+    // when address turns 1111, we can't just change the encoding right away, we need to wait for it to finish loading first, all 24 bits sent
+    if  (&original_pixel_address[COLUMN_DIMENSION_BITS-1:0] & writer_pixel_done){
       reverse.d = reverse.q + 1; // toggle the reverse flag, test 1
     }
-
+    
     if (reverse.q)
     {
-       reversed_pixel_address = led_strip.pixel_address ^ c{HIGHER_BITSx{b0},COLUMN_DIMENSION_BITSx{b1}}; // higher bits stays the same
+       reversed_pixel_address = original_pixel_address ^ c{HIGHER_BITSx{b0},COLUMN_DIMENSION_BITSx{b1}}; // higher bits stays the same 
       // reversed_pixel_address = 0; // test color at 0 which is 11 --> white
      }
     else
     {
-      reversed_pixel_address = led_strip.pixel_address;
+      reversed_pixel_address = original_pixel_address;
     }
+    
 ```
 
-And then find the encoded bits as usual:
-
+Then decide whether we reverse the original addresses or not:
 ```
-    if (matrix_used.q){ // if we decide to flip the leftmost bit, we reverse every other row
+    if (activate){ // if we decide to flip the leftmost bit, we reverse every other row
       // reverse every other row
-      encoded_pixel_address = reversed_pixel_address * 2;
+      effective_pixel_address = reversed_pixel_address * 2;
     }
     else{
-      // don't reverse every other row
-      encoded_pixel_address = led_strip.pixel_address * 2;
+      // don't reverse every other row 
+      effective_pixel_address = original_pixel_address * 2;
     }
+```
 
+And then finally in `au_top`, we simply use it and find the encoded bits as usual:
 
-    // get current color encoding for this pixel
+```
+    // connect reverser to led_strip 
+    index_reverser.original_pixel_address = led_strip.pixel_address;
+    index_reverser.writer_pixel_done = led_strip.next_pixel;
+    index_reverser.activate = matrix_used.q;
+    encoded_pixel_address = index_reverser.effective_pixel_address;
+    
+    // led_strip.pixel_address will vary between 0000 to 1100 
+    // address 0 --> encoding bit 1:0 
+    // address 1 --> encoding bit 3:2 
+    // address 2 --> encoding bit 5
+    // address N --> encoding bit N*2+1:N*2
+    
+ 
+   // get current color encoding for this pixel
     for (index=0; index<$clog2(ENCODING_AMOUNT); index++){
        current_color_encoding[index] = led_encoding.q[encoded_pixel_address+index];
     }
+    
+    // based on the encoding extracted from dff led_encoding, we get the 24bit color value
+    led_strip.color = LEDCOLOR[current_color_encoding]; 
+    outled=led_strip.led;
 ```
 
 To witness this, load the binary to a WS2812B LED matrix and press `io_button[1]`, then **refresh** with `io_button[0]`. You should see all the color displayed from "left to right" instead of snaking around.
