@@ -14,20 +14,21 @@ module ws2812b_writer #(
     input clear, // this will clear the LED matrix regardless of update 
     output pixel_address[$clog2(PIXEL_COUNT)],  // Index of the LED, with the color in color[24]
     output led,		//Goes to the first LED in the chain
-    output next_pixel,
-    output reset
+    output next_pixel, // this turns to 1 for 1 FPGA clock cycle each time we are done with writing a pixel 
+    output reset, // this turns to 1 when we are at RESET state
+    output done // this turns to 1 once we have refreshed all pixels in the LED
 
   ) {
   
   .clk(clk) {
     .rst(rst) {
-      fsm state = {SEND_PIXEL, RESET, CLEAR};
+      fsm state(#INIT(RESET)) = {SEND_PIXEL, RESET, CLEAR}; // start at RESET state, don't show anything yet
       dff pixel_address_ctr[$clog2(PIXEL_COUNT)](#INIT(0));
       dff bit_ctr[5];
       dff ctr[7];
       dff rst_ctr [$clog2(5000)]; //reset requires 50us of zeroes 
       dff update_request(#INIT(0), .clk(clk), .rst(rst)); // to store update request so we don't miss it 
-      dff clear_request(#INIT(0), .clk(clk), .rst(rst)); // to store clear request so we don't miss it 
+      dff clear_request(#INIT(1), .clk(clk), .rst(rst)); // to store clear request so we don't miss it, initialised to 0 so we always clear LED upon boot
     }
   }
   
@@ -47,6 +48,7 @@ module ws2812b_writer #(
           clear_request.d = clear; 
     }
     
+    done = 0;
     
     case (state.q) {
       state.SEND_PIXEL:
@@ -65,6 +67,7 @@ module ws2812b_writer #(
             next_pixel = 1; // safe to change pixel
             pixel_address_ctr.d = pixel_address_ctr.q + 1; // advance pixel counter
             if (pixel_address_ctr.q == PIXEL_COUNT-1) { // check if you have sent data to all LEDs
+              done = 1;
               state.d = state.RESET;
             }
           }
