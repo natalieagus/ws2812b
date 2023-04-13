@@ -19,21 +19,21 @@ module au_top (
   const PIXEL_COUNT = COLUMN_DIMENSION *  ROW_DIMENSION;   
   const ENCODING_AMOUNT = 4; // how many different encodings are used? As example, we use 4
   
+  // WHITE (11), BLUE (10), RED (01), GREEN (00)
+  const LEDCOLOR = {24hFFFFFF, 24hFF0000, 24h00FF00, 24h0000FF}; 
+  
   sig rst; // reset signal
   sig encoded_pixel_address[$clog2(PIXEL_COUNT)*$clog2(ENCODING_AMOUNT)];
   sig current_color_encoding[$clog2(ENCODING_AMOUNT)];
 
   var index;
 
-  // WHITE (11), BLUE (10), RED (01), GREEN (00)
-  const LEDCOLOR = {24hFFFFFF, 24hFF0000, 24h00FF00, 24h0000FF}; 
-  
   // observed output of the strip: (if matrix is used, this is the value of the top row or first row)
   // (connector) WHITE WHITE BLUE WHITE RED WHITE GREEN WHITE BLUE BLUE BLUE BLUE BLUE BLUE BLUE BLUE (end of strip)
   // e.g: E is 1110 ---> 10 first (BLUE) then 11 (WHITE)
   // as example, we repeat pattern each row, assuming there are 16 cols in a row hence 32 bits of encoded data per row
-  dff led_encoding[PIXEL_COUNT*2](.clk(clk), .rst(rst), #INIT(ROW_DIMENSIONx{32hAAAACDEF})); // 2 bit to encode a color per pixel
-  dff temp_encoding[PIXEL_COUNT*2](.clk(clk), .rst(rst), #INIT(0)); // holds temporary value (double buffering)
+  dff led_encoding[PIXEL_COUNT*$clog2(ENCODING_AMOUNT)](.clk(clk), .rst(rst), #INIT(ROW_DIMENSIONx{32hAAAACDEF})); // 2 bit to encode a color per pixel
+  dff temp_encoding[PIXEL_COUNT*$clog2(ENCODING_AMOUNT)](.clk(clk), .rst(rst), #INIT(0)); // holds temporary value (double buffering)
   
   ws2812b_writer led_strip(#PIXEL_COUNT(PIXEL_COUNT), .clk(clk), .rst(rst)); 
   fsm state(.clk(clk), .rst(rst)) = {IDLE, LOAD};
