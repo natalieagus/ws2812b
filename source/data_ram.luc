@@ -1,0 +1,55 @@
+module data_ram #(
+DEPTH = 32 : DEPTH > 0
+    )(
+    input clk,  // clock
+    input rst,  // reset
+    input address[$clog2(DEPTH)],
+    output out_encoding[2],
+    output ready,
+    output debug_address_pointer[$clog2(DEPTH)],
+    output debug_rom_data[2]
+  ) {
+  
+  data_rom rom;
+  fsm writer(.clk(clk), .rst(rst)) = {WRITE, IDLE};
+  dff writer_pointer[$clog2(DEPTH)](#INIT(0),.clk(clk), .rst(rst));
+  
+  simple_dual_ram ram(.rclk(clk), .wclk(clk), #DEPTH(DEPTH), #SIZE(2));
+  
+  always {
+    ram.raddr = 0;
+    ram.waddr = 0;
+    ram.write_data = 0;
+    ram.write_en = 0;
+    
+    rom.address = 0;
+    out_encoding = 0;
+    debug_rom_data = 0;
+    
+    ready = writer.q == writer.IDLE;
+    debug_address_pointer = writer_pointer.q;
+    
+    case (writer.q){
+      writer.WRITE:
+        rom.address = writer_pointer.q; // get the data to write from rom
+        ram.write_en = b1; // enable the dual ram write
+        ram.waddr = writer_pointer.q; // write to the respective address
+        ram.write_data = rom.out_encoding; // write data from rom to the ram 
+        writer_pointer.d = writer_pointer.q + 1; // advance the write pointer
+        writer.d = writer.WRITE;
+        // if you have written all addresses, go to idle
+        if (&writer_pointer.q){
+          writer.d = writer.IDLE;
+        }
+
+      writer.IDLE:
+        rom.address = address;
+        ram.raddr = address;
+        out_encoding = ram.read_data;
+        debug_rom_data = rom.out_encoding; // for debugging
+        writer.d = writer.IDLE; // remain in state
+      
+    }
+    
+  }
+}

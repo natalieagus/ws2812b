@@ -1,0 +1,16 @@
+module data_rom#(
+    DEPTH= 32 : DEPTH > 0
+  ) (
+    input address[$clog2(DEPTH)], // word addressing expected
+    output out_encoding[2]
+  ) {
+  
+  const DATA_ROM = {
+    b11, b11, b11, b11, b11, b11, b11, b11, b01, b10, b01, b01, b01, b10, b01, b01,
+    b00, b00, b00, b00, b00, b00, b00, b00, b00, b01, b10, b10, b10, b10, b10, b01
+  };
+
+  always {
+    out_encoding = DATA_ROM[address];
+  }
+}

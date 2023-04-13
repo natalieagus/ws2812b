@@ -23,17 +23,9 @@ module au_top (
   const LEDCOLOR = {24hFFFFFF, 24hFF0000, 24h00FF00, 24h0000FF}; 
   
   sig rst; // reset signal
-  sig encoded_pixel_address[$clog2(PIXEL_COUNT)*$clog2(ENCODING_AMOUNT)];
-  sig current_color_encoding[$clog2(ENCODING_AMOUNT)];
 
-  var index;
-
-  // observed output of the strip: (if matrix is used, this is the value of the top row or first row)
-  // (connector) WHITE WHITE BLUE WHITE RED WHITE GREEN WHITE BLUE BLUE BLUE BLUE BLUE BLUE BLUE BLUE (end of strip)
-  // e.g: E is 1110 ---> 10 first (BLUE) then 11 (WHITE)
-  // as example, we repeat pattern each row, assuming there are 16 cols in a row hence 32 bits of encoded data per row
-  dff led_encoding[PIXEL_COUNT*$clog2(ENCODING_AMOUNT)](.clk(clk), .rst(rst), #INIT(ROW_DIMENSIONx{32hAAAACDEF})); // 2 bit to encode a color per pixel
-  dff temp_encoding[PIXEL_COUNT*$clog2(ENCODING_AMOUNT)](.clk(clk), .rst(rst), #INIT(0)); // holds temporary value (double buffering)
+  // the data_ram
+  data_ram ram(.clk(clk), .rst(rst));
   
   ws2812b_writer led_strip(#PIXEL_COUNT(PIXEL_COUNT), .clk(clk), .rst(rst)); 
   fsm state(.clk(clk), .rst(rst)) = {IDLE, LOAD};
@@ -69,6 +61,8 @@ module au_top (
     io_seg = 8hff;          // turn segments off
     io_sel = 4hf;           // select no digits
     
+    ram.address = 0;        // address 0 selected by default
+    
     latch_button.in = io_button[0]; // use this button to latch io_dip value to led_encoding dff 
     latch_button_edge.in = latch_button.out;
     
@@ -86,56 +80,50 @@ module au_top (
     led_strip.update = 0; // do not refresh by default
     led_strip.clear = 0; // do not clear by default
     
+    // connect reverser to led_strip 
+    index_reverser.original_pixel_address = led_strip.pixel_address;
+    index_reverser.writer_pixel_done = led_strip.next_pixel;
+    index_reverser.activate = matrix_used.q;
+    
+    ram.address = 0; 
 
     // use io_dip[2:0]  to encode 12 unique pixel values at most (24 bits)
     case (state.q){
       state.IDLE:
-             if (latch_button_edge.out){
-                temp_encoding.d = 16x{c{io_dip[2], io_dip[2], io_dip[1], io_dip[0]}};
+             // when ram is ready, and led is idling at RESET state, we load the strip
+             if (latch_button_edge.out & ram.ready & led_strip.reset){
                 state.d = state.LOAD;
+                ram.address = index_reverser.effective_pixel_address;
+                led_strip.update = 1;
               }
              if (clear_button_edge.out){
                  led_strip.clear = 1;
               }
       
       state.LOAD:
-            // wait until we are at RESET state before we decide to refresh the screen
-            if (led_strip.reset){
-                // tell the LED to update the pixels
-                led_strip.update = 1;
-                led_encoding.d = temp_encoding.q;
+            // if at the last FPGA clock cycle for this bit, advance the address first because our RAM needs 1 additional clock cycle to work
+            if (led_strip.next_pixel){
+              index_reverser.original_pixel_address = led_strip.pixel_address + 1;
+            }
+      
+            // pass this to ram 
+            ram.address = index_reverser.effective_pixel_address;
+            
+            // wait until we are all done in updating our LED;
+            if (led_strip.done){
                 state.d = state.IDLE;
             }
     }
-    
-    // connect reverser to led_strip 
-    index_reverser.original_pixel_address = led_strip.pixel_address;
-    index_reverser.writer_pixel_done = led_strip.next_pixel;
-    index_reverser.activate = matrix_used.q;
-    encoded_pixel_address = index_reverser.effective_pixel_address;
-    
-    // led_strip.pixel_address will vary between 0000 to 1100 
-    // address 0 --> encoding bit 1:0 
-    // address 1 --> encoding bit 3:2 
-    // address 2 --> encoding bit 5
-    // address N --> encoding bit N*2+1:N*2
-    
- 
-   // get current color encoding for this pixel
-    for (index=0; index<$clog2(ENCODING_AMOUNT); index++){
-       current_color_encoding[index] = led_encoding.q[encoded_pixel_address+index];
-    }
-    
-    // based on the encoding extracted from dff led_encoding, we get the 24bit color value
-    led_strip.color = LEDCOLOR[current_color_encoding]; 
-    outled=led_strip.led;
+
+    led_strip.color = LEDCOLOR[ram.out_encoding]; 
+    outled = led_strip.led;
     
     // debug 
+    io_led[0] = index_reverser.effective_pixel_address;
+    io_led[1] = led_strip.pixel_address;
+    io_led[2] = ram.debug_rom_data;
+    
     // show the current LED color
-    io_led[0] = led_encoding.q[7:0];
-    io_led[1] = led_encoding.q[15:8];
-    io_led[2] = led_encoding.q[23:16];
-   
     led[0] = matrix_used.q; 
     led[7:1] = led_strip.pixel_address;
     

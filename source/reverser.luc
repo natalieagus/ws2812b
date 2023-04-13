@@ -1,6 +1,7 @@
 module reverser #(
   COLUMN_DIMENSION = 4 : COLUMN_DIMENSION > 0,
-  ROW_DIMENSION = 4 : ROW_DIMENSION > 0
+  ROW_DIMENSION = 4 : ROW_DIMENSION > 0,
+  ENCODING_AMOUNT = 1 : ENCODING_AMOUNT > 0
   )(
     input clk,  // clock
     input rst,  // reset
@@ -52,11 +53,11 @@ module reverser #(
     
     if (activate){ // if we decide to flip the leftmost bit, we reverse every other row
       // reverse every other row
-      effective_pixel_address = reversed_pixel_address * 2;
+      effective_pixel_address = reversed_pixel_address;
     }
     else{
       // don't reverse every other row 
-      effective_pixel_address = original_pixel_address * 2;
+      effective_pixel_address = original_pixel_address;
     }
     
   }
