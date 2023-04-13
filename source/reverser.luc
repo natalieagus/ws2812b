@@ -53,11 +53,11 @@ module reverser #(
     
     if (activate){ // if we decide to flip the leftmost bit, we reverse every other row
       // reverse every other row
-      effective_pixel_address = reversed_pixel_address * $clog2(ENCODING_AMOUNT);
+      effective_pixel_address = reversed_pixel_address;
     }
     else{
       // don't reverse every other row 
-      effective_pixel_address = original_pixel_address * $clog2(ENCODING_AMOUNT);
+      effective_pixel_address = original_pixel_address;
     }
     
   }

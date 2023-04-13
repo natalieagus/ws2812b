@@ -112,7 +112,7 @@ module au_top (
     index_reverser.original_pixel_address = led_strip.pixel_address;
     index_reverser.writer_pixel_done = led_strip.next_pixel;
     index_reverser.activate = matrix_used.q;
-    encoded_pixel_address = index_reverser.effective_pixel_address;
+    encoded_pixel_address = index_reverser.effective_pixel_address * $clog2(ENCODING_AMOUNT);
     
     // led_strip.pixel_address will vary between 0000 to 1100 
     // address 0 --> encoding bit 1:0 
