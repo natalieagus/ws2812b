@@ -13,14 +13,32 @@ module au_top (
   ) {
   
   // We shall always assume that COLUMN_DIMENSION and ROW_DIMENSION is a 2^x
-  const COLUMN_DIMENSION = 16; // how many "columns"? 
-  const ROW_DIMENSION = 4; // how many "rows"?
+  const COLUMN_DIMENSION = 8; // how many "columns"? 
+  const ROW_DIMENSION = 8; // how many "rows"?
 
   const PIXEL_COUNT = COLUMN_DIMENSION *  ROW_DIMENSION;   
   const ENCODING_AMOUNT = 4; // how many different encodings are used? As example, we use 4
   
+  // This is a custom encoding
   // WHITE (11), BLUE (10), RED (01), GREEN (00)
   const LEDCOLOR = {24hFFFFFF, 24hFF0000, 24h00FF00, 24h0000FF}; 
+  
+  // TEST case: for 8x8 matrix, needs 64x2 bits = 128 bits
+  // every row will display the same thing 
+  // only dictate what each row color should be 
+  // The ROM consist of 8 different color sets, the LED matrix strip will cycle through these
+  const ROM = {
+    16b0000000011111111, // green green green green white white white white
+    16b0101010110101010,
+    16b1110000110100000,
+    16b1111111111111111,
+    16b0000000000000000,
+    16b0101010101010101,
+    16b1010101010101010,
+    16b0001101100011011 //  green, red, blue, white, green, red, blue, white (repeat each row) 
+  };
+  
+
   
   sig rst; // reset signal
   sig encoded_pixel_address[$clog2(PIXEL_COUNT)*$clog2(ENCODING_AMOUNT)];
@@ -32,8 +50,13 @@ module au_top (
   // (connector) WHITE WHITE BLUE WHITE RED WHITE GREEN WHITE BLUE BLUE BLUE BLUE BLUE BLUE BLUE BLUE (end of strip)
   // e.g: E is 1110 ---> 10 first (BLUE) then 11 (WHITE)
   // as example, we repeat pattern each row, assuming there are 16 cols in a row hence 32 bits of encoded data per row
-  dff led_encoding[PIXEL_COUNT*$clog2(ENCODING_AMOUNT)](.clk(clk), .rst(rst), #INIT(ROW_DIMENSIONx{32hAAAACDEF})); // 2 bit to encode a color per pixel
+  dff led_encoding[PIXEL_COUNT*$clog2(ENCODING_AMOUNT)](.clk(clk), .rst(rst), #INIT(8x{ROM[0]})); // 2 bit to encode a color per pixel
   dff temp_encoding[PIXEL_COUNT*$clog2(ENCODING_AMOUNT)](.clk(clk), .rst(rst), #INIT(0)); // holds temporary value (double buffering)
+  
+  
+  // for ROM encoding
+  dff counter[28](.clk(clk), .rst(rst), #INIT(0));
+  dff rom_address[$clog2(ROW_DIMENSION)](.clk(clk), #INIT(0), .rst(rst));
   
   ws2812b_writer led_strip(#PIXEL_COUNT(PIXEL_COUNT), .clk(clk), .rst(rst)); 
   fsm state(.clk(clk), .rst(rst)) = {IDLE, LOAD};
@@ -41,8 +64,6 @@ module au_top (
   reverser index_reverser(.clk(clk), .rst(rst), #COLUMN_DIMENSION(COLUMN_DIMENSION), #ROW_DIMENSION(ROW_DIMENSION));
   
   // user inputs 
-  button_conditioner latch_button(.clk(clk));
-  edge_detector latch_button_edge(.clk(clk), #RISE(1), #FALL(0));
   button_conditioner clear_button(.clk(clk));
   edge_detector clear_button_edge(.clk(clk), #RISE(1), #FALL(0));
   button_conditioner reverse_button(.clk(clk));
@@ -69,9 +90,12 @@ module au_top (
     io_seg = 8hff;          // turn segments off
     io_sel = 4hf;           // select no digits
     
-    latch_button.in = io_button[0]; // use this button to latch io_dip value to led_encoding dff 
-    latch_button_edge.in = latch_button.out;
+    counter.d = counter.q + 1;
     
+    if (&counter.q){ // load new value when counter.q is all 1
+      rom_address.d = rom_address.q + 1; // advance ROM address by 1 the moment counter[27] (MSB) is 1
+    }
+   
     clear_button.in = io_button[2]; // use this button to turn off all LEDs 
     clear_button_edge.in = clear_button.out;
     
@@ -90,13 +114,14 @@ module au_top (
     // use io_dip[2:0]  to encode 12 unique pixel values at most (24 bits)
     case (state.q){
       state.IDLE:
-             if (latch_button_edge.out){
-                temp_encoding.d = 16x{c{io_dip[2], io_dip[2], io_dip[1], io_dip[0]}};
+           if(~|counter.q){ // load new value when counter is all zero
+                temp_encoding.d = 8x{ROM[rom_address.q]};
                 state.d = state.LOAD;
-              }
-             if (clear_button_edge.out){
-                 led_strip.clear = 1;
-              }
+            }
+
+            if (clear_button_edge.out){
+                led_strip.clear = 1;
+            }
       
       state.LOAD:
             // wait until we are at RESET state before we decide to refresh the screen
@@ -120,7 +145,6 @@ module au_top (
     // address 2 --> encoding bit 5
     // address N --> encoding bit N*2+1:N*2
     
- 
    // get current color encoding for this pixel
     for (index=0; index<$clog2(ENCODING_AMOUNT); index++){
        current_color_encoding[index] = led_encoding.q[encoded_pixel_address+index];

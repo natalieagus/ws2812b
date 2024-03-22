@@ -3,7 +3,12 @@
 WS2812B is a intelligent control LED light source that the control circuit and RGB chip are integrated in a package of 5050 components. You The data transfer protocol use single **NZR** communication mode. This driver is written in [Lucid](https://alchitry.com/lucid) and is meant to be run on [Alchitry Au](https://www.sparkfun.com/products/16527) Boards + [Alchitry Br](https://www.sparkfun.com/products/16524) prototype element board.
 
 ## RAM Usage
-Checkout the matrix-ram branch for implementation with RAM. 
+
+Checkout the matrix-ram branch for implementation with RAM.
+
+## ROM Usage
+
+Checkout the matrix-rom branch for implementation with ROM. This implementation cycles through a ROM automatically without latch-button.
 
 ## Demo
 
@@ -72,34 +77,35 @@ A matrix is essentially a long strip with reversed index every other odd row, so
 Hence we shall reverse the physical index accordingly every other row. This can be found at `reverser.luc`:
 
 ```
-    // check if we are a multiple of DIMENSION 
+    // check if we are a multiple of DIMENSION
     // here in our example, we have column 0 to 15
     // so each time the last four bit our pixel_address is 1111, we will reverse the row addressing
     // when address turns 1111, we can't just change the encoding right away, we need to wait for it to finish loading first, all 24 bits sent
     if  (&original_pixel_address[COLUMN_DIMENSION_BITS-1:0] & writer_pixel_done){
       reverse.d = reverse.q + 1; // toggle the reverse flag, test 1
     }
-    
+
     if (reverse.q)
     {
-       reversed_pixel_address = original_pixel_address ^ c{HIGHER_BITSx{b0},COLUMN_DIMENSION_BITSx{b1}}; // higher bits stays the same 
+       reversed_pixel_address = original_pixel_address ^ c{HIGHER_BITSx{b0},COLUMN_DIMENSION_BITSx{b1}}; // higher bits stays the same
       // reversed_pixel_address = 0; // test color at 0 which is 11 --> white
      }
     else
     {
       reversed_pixel_address = original_pixel_address;
     }
-    
+
 ```
 
 Then decide whether we reverse the original addresses or not:
+
 ```
     if (activate){ // if we decide to flip the leftmost bit, we reverse every other row
       // reverse every other row
       effective_pixel_address = reversed_pixel_address * 2;
     }
     else{
-      // don't reverse every other row 
+      // don't reverse every other row
       effective_pixel_address = original_pixel_address * 2;
     }
 ```
@@ -107,26 +113,26 @@ Then decide whether we reverse the original addresses or not:
 And then finally in `au_top`, we simply use it and find the encoded bits as usual:
 
 ```
-    // connect reverser to led_strip 
+    // connect reverser to led_strip
     index_reverser.original_pixel_address = led_strip.pixel_address;
     index_reverser.writer_pixel_done = led_strip.next_pixel;
     index_reverser.activate = matrix_used.q;
     encoded_pixel_address = index_reverser.effective_pixel_address;
-    
-    // led_strip.pixel_address will vary between 0000 to 1100 
-    // address 0 --> encoding bit 1:0 
-    // address 1 --> encoding bit 3:2 
+
+    // led_strip.pixel_address will vary between 0000 to 1100
+    // address 0 --> encoding bit 1:0
+    // address 1 --> encoding bit 3:2
     // address 2 --> encoding bit 5
     // address N --> encoding bit N*2+1:N*2
-    
- 
+
+
    // get current color encoding for this pixel
     for (index=0; index<$clog2(ENCODING_AMOUNT); index++){
        current_color_encoding[index] = led_encoding.q[encoded_pixel_address+index];
     }
-    
+
     // based on the encoding extracted from dff led_encoding, we get the 24bit color value
-    led_strip.color = LEDCOLOR[current_color_encoding]; 
+    led_strip.color = LEDCOLOR[current_color_encoding];
     outled=led_strip.led;
 ```
 
@@ -151,5 +157,6 @@ It outputs `pixel_address`, which is the address of the current LED that should 
 It also outputs `reset` flag, which is `1` when the writer is at the `RESET` state. When `reset == 1`, we change the `color` input to the writer so that it can display a fresh new set of value to to the LEDs.
 
 Finally, it outputs two more helper bits:
+
 - `next_pixel` that will be `1` for exactly 1 FPGA clock cycle if we are currently sending the **last** FPGA clock cycle of the 24-bit color.
 - `done` that will be `1` for exactly 1 FPGA clock cycle if we are currently sending the **last** FPGA clock cycle of the 24-bit color of ALL pixels.
