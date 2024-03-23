@@ -1,20 +1,40 @@
 module data_ram #(
-DEPTH = 32 : DEPTH > 0
+    ROW_DIMENSION = 4 : ROW_DIMENSION > 0,
+    COLUMN_DIMENSION = 4 : COLUMN_DIMENSION > 0,
+    ENCODING_AMOUNT = 4 : ENCODING_AMOUNT > 0
     )(
     input clk,  // clock
     input rst,  // reset
-    input address[$clog2(DEPTH)],
+    input update,
+    input player_x_pos[3],
+    input player_y_pos[3],
+    input address[$clog2(ROW_DIMENSION*COLUMN_DIMENSION)],
     output out_encoding[2],
     output ready,
-    output debug_address_pointer[$clog2(DEPTH)],
-    output debug_rom_data[2]
+    output debug_address_pointer[$clog2(ROW_DIMENSION*COLUMN_DIMENSION)],
+    output debug_data[3]
   ) {
   
-  data_rom rom;
-  fsm writer(.clk(clk), .rst(rst)) = {WRITE, IDLE};
+  const DEPTH =  COLUMN_DIMENSION * ROW_DIMENSION;
+  fsm writer(.clk(clk), .rst(rst)) = {
+    INIT, 
+    WRITE_TOP_RIGHT, 
+    WRITE_TOP_LEFT, 
+    WRITE_BOTTOM_RIGHT, 
+    WRITE_BOTTOM_LEFT, 
+    ERASE_TOP_RIGHT, 
+    ERASE_TOP_LEFT, 
+    ERASE_BOTTOM_LEFT, 
+    ERASE_BOTTOM_RIGHT, 
+    IDLE
+    };
   dff writer_pointer[$clog2(DEPTH)](#INIT(0),.clk(clk), .rst(rst));
+  dff update_flag(#INIT(0), .clk(clk), .rst(rst));
   
-  simple_dual_ram ram(.rclk(clk), .wclk(clk), #DEPTH(DEPTH), #SIZE(2));
+  const BACKGROUND_COLOR = b00;
+  const PLAYER_COLOR = b01;
+  
+  simple_dual_ram ram(.rclk(clk), .wclk(clk), #DEPTH(DEPTH), #SIZE($clog2(ENCODING_AMOUNT)));
   
   always {
     ram.raddr = 0;
@@ -22,32 +42,105 @@ DEPTH = 32 : DEPTH > 0
     ram.write_data = 0;
     ram.write_en = 0;
     
-    rom.address = 0;
+
     out_encoding = 0;
-    debug_rom_data = 0;
+    debug_data = 0;
     
     ready = writer.q == writer.IDLE;
     debug_address_pointer = writer_pointer.q;
     
+    // always catch any positive update request 
+    if (update){
+      update_flag.d = update;
+    }
+    
     case (writer.q){
-      writer.WRITE:
-        rom.address = writer_pointer.q; // get the data to write from rom
+      writer.INIT: 
+        // set all values to zero 
+        ram.write_en = b1; 
+        ram.waddr = writer_pointer.q; 
+        // these are test dots, to know your hardware orientation
+        if (writer_pointer.q == d0){
+          ram.write_data = b11; // white at RAM address 0, this will be your coordinate (0,0)
+        }
+        else if (writer_pointer.q == d7){
+           ram.write_data = b10; // test blue at RAM address 7
+        }
+        else if (&writer_pointer.q){
+            ram.write_data = b01;  // test red at RAM biggest RAM address
+        }
+        else{
+          ram.write_data = BACKGROUND_COLOR; 
+        }
+        writer_pointer.d = writer_pointer.q + 1; 
+        if (&writer_pointer.q){
+          // advanced to write 
+          writer.d = writer.WRITE_TOP_RIGHT;
+          // set writer pointer to player position 
+          writer_pointer.d = player_y_pos*8 + player_x_pos;
+        }
+        debug_data = b01;
+        
+      writer.ERASE_TOP_RIGHT: 
+        ram.write_en = b1; 
+        ram.waddr = writer_pointer.q; // this is old player address 
+        ram.write_data = BACKGROUND_COLOR; // set back to background color 
+        writer.d = writer.ERASE_TOP_LEFT;
+      
+       writer.ERASE_TOP_LEFT:
+        ram.write_en = b1; 
+        ram.waddr = writer_pointer.q + 1; 
+        ram.write_data = BACKGROUND_COLOR; // set back to background color
+        writer.d = writer.ERASE_BOTTOM_LEFT;
+     
+      writer.ERASE_BOTTOM_LEFT:
+        ram.write_en = b1; 
+        ram.waddr = writer_pointer.q + 1 + COLUMN_DIMENSION; 
+        ram.write_data = BACKGROUND_COLOR; // set back to background color
+        writer.d = writer.ERASE_BOTTOM_RIGHT;
+        
+      writer.ERASE_BOTTOM_RIGHT:
+        ram.write_en = b1;
+        ram.waddr = writer_pointer.q + COLUMN_DIMENSION;
+        writer_pointer.d = player_y_pos*8 + player_x_pos; // update player position    
+        ram.write_data = BACKGROUND_COLOR; // set back to background color    
+        writer.d = writer.WRITE_TOP_RIGHT; // go to next state to draw new player location
+           
+      writer.WRITE_TOP_RIGHT:
         ram.write_en = b1; // enable the dual ram write
         ram.waddr = writer_pointer.q; // write to the respective address
-        ram.write_data = rom.out_encoding; // write data from rom to the ram 
-        writer_pointer.d = writer_pointer.q + 1; // advance the write pointer
-        writer.d = writer.WRITE;
-        // if you have written all addresses, go to idle
-        if (&writer_pointer.q){
-          writer.d = writer.IDLE;
-        }
-
+        ram.write_data = PLAYER_COLOR; // write player position (red)_
+        writer.d = writer.WRITE_TOP_LEFT;
+        debug_data = b10;
+        
+       writer.WRITE_TOP_LEFT:
+        ram.write_en = b1; 
+        ram.waddr = writer_pointer.q + 1; 
+        ram.write_data = PLAYER_COLOR; // set back to background color
+        writer.d = writer.WRITE_BOTTOM_LEFT;
+     
+      writer.WRITE_BOTTOM_LEFT:
+        ram.write_en = b1; 
+        ram.waddr = writer_pointer.q + 1 + COLUMN_DIMENSION; 
+        ram.write_data = PLAYER_COLOR; // set back to background color
+        writer.d = writer.WRITE_BOTTOM_RIGHT;
+        
+      writer.WRITE_BOTTOM_RIGHT:
+        ram.write_en = b1;
+        ram.waddr = writer_pointer.q + COLUMN_DIMENSION;
+        ram.write_data = PLAYER_COLOR; // write player position (red)_     
+        writer.d = writer.IDLE; // go to next state to draw new player location
+        
       writer.IDLE:
-        rom.address = address;
         ram.raddr = address;
         out_encoding = ram.read_data;
-        debug_rom_data = rom.out_encoding; // for debugging
+        debug_data = 0; // for debugging
         writer.d = writer.IDLE; // remain in state
+        if (update_flag.q){
+            update_flag.d = 0;
+            writer.d = writer.ERASE_TOP_RIGHT;
+        }
+        debug_data = c{b11, update_flag.q};
       
     }
     

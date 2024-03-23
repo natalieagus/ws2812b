@@ -12,36 +12,42 @@ module au_top (
     input io_dip [3][8]     // DIP switches on IO Shield
   ) {
   
+  // We test on an 8x8 WS2812B matrix, please change as required
   // We shall always assume that COLUMN_DIMENSION and ROW_DIMENSION is a 2^x
-  const COLUMN_DIMENSION = 16; // how many "columns"? 
-  const ROW_DIMENSION = 4; // how many "rows"?
+  const COLUMN_DIMENSION = 8; // how many "columns"? 
+  const ROW_DIMENSION = 8; // how many "rows"?
 
   const PIXEL_COUNT = COLUMN_DIMENSION *  ROW_DIMENSION;   
-  const ENCODING_AMOUNT = 4; // how many different encodings are used? As example, we use 4
+  const ENCODING_AMOUNT = 4; // how many different encodings are used? As example, we use 4 colors, hence ENCODING_AMOUNT is 4
   
-  // WHITE (11), BLUE (10), RED (01), GREEN (00)
-  const LEDCOLOR = {24hFFFFFF, 24hFF0000, 24h00FF00, 24h0000FF}; 
+  // OFF WHITE (11), DIM BLUE (10), DIM RED (01), OFF(00)
+  const LEDCOLOR = {24h0F0F0F, 24h030000, 24h000300, 24h000000}; 
   
   sig rst; // reset signal
 
-  // the data_ram
-  data_ram ram(.clk(clk), .rst(rst));
+  // the data_ram, this is a custom data_ram for demonstration purposes
+  // along with custom "player location"
+  data_ram ram(#ROW_DIMENSION(ROW_DIMENSION), #ENCODING_AMOUNT(ENCODING_AMOUNT), #COLUMN_DIMENSION(COLUMN_DIMENSION), .clk(clk), .rst(rst));
+  
+  // 0,0 is assumed to be at the top right of LED matrix: Check this with your matrix orientation
+  // right ---> x --
+  // left ---> x++ 
+  // down ---> y++ 
+  dff player_x_pos[3](.clk(clk), #INIT(010), .rst(rst));
+  dff player_y_pos[3](.clk(clk), #INIT(001), .rst(rst));
+  dff update_ram_flag(.clk(clk), #INIT(0), .rst(rst));
   
   ws2812b_writer led_strip(#PIXEL_COUNT(PIXEL_COUNT), .clk(clk), .rst(rst)); 
-  fsm state(.clk(clk), .rst(rst)) = {IDLE, LOAD};
+  fsm state(.clk(clk), .rst(rst)) = {IDLE, UPDATE_RAM, REFRESH};
   
-  reverser index_reverser(.clk(clk), .rst(rst), #COLUMN_DIMENSION(COLUMN_DIMENSION), #ROW_DIMENSION(ROW_DIMENSION));
+  reverser index_reverser(#COLUMN_DIMENSION(COLUMN_DIMENSION), #ROW_DIMENSION(ROW_DIMENSION));
   
   // user inputs 
-  button_conditioner latch_button(.clk(clk));
-  edge_detector latch_button_edge(.clk(clk), #RISE(1), #FALL(0));
-  button_conditioner clear_button(.clk(clk));
-  edge_detector clear_button_edge(.clk(clk), #RISE(1), #FALL(0));
-  button_conditioner reverse_button(.clk(clk));
-  edge_detector reverse_button_edge(.clk(clk), #RISE(1), #FALL(0));
-  
-  // a state to toggle revere 
-  dff matrix_used(#INIT(0), .clk(clk), .rst(rst));
+  button_conditioner movement_button[4](.clk(clk));
+  edge_detector movement_button_edge[4](.clk(clk), #RISE(1), #FALL(0));
+  button_conditioner start_button(.clk(clk));
+  edge_detector start_button_edge(.clk(clk), #RISE(1), #FALL(0));
+ 
   
   .clk(clk) {
     // The reset conditioner is used to synchronize the reset signal to the FPGA
@@ -63,44 +69,77 @@ module au_top (
     
     ram.address = 0;        // address 0 selected by default
     
-    latch_button.in = io_button[0]; // use this button to latch io_dip value to led_encoding dff 
-    latch_button_edge.in = latch_button.out;
+    movement_button.in = c{io_button[4], io_button[3], io_button[2], io_button[0]}; // up, down, left, right
+    movement_button_edge.in = movement_button.out;
     
-    clear_button.in = io_button[2]; // use this button to turn off all LEDs 
-    clear_button_edge.in = clear_button.out;
+    start_button.in = io_button[1]; // use this button to enable reverse
+    start_button_edge.in = start_button.out;
     
-    reverse_button.in = io_button[1]; // use this button to enable reverse
-    reverse_button_edge.in = reverse_button.out;
-    
-    // toggle matrix used button 
-    if (reverse_button_edge.out){
-      matrix_used.d = matrix_used.q + 1;
+    // the sample matrix we use has top RIGHT as 0,0
+    // check player movement update 
+    // we assume a player is a 2x2 square, the coordinate stored in player_x_pos and player_y_pos indicate top right dot 
+    if (movement_button_edge.out[0]){
+      // clamp at 0
+      if (|player_y_pos.q){
+         player_y_pos.d = player_y_pos.q - 1; // up (because up decreases y coordinate in the RAM)
+      }
     }
+    
+    if (movement_button_edge.out[1]){
+      // clamp 
+      if (player_y_pos.q < COLUMN_DIMENSION-2){
+      player_y_pos.d = player_y_pos.q + 1; // down (because down increases y coordinate in the RAM
+      }
+    }
+    
+    if (movement_button_edge.out[2]){ // io_button[3]
+      // clamp 
+      if (player_x_pos.q < COLUMN_DIMENSION-2){
+        player_x_pos.d = player_x_pos.q + 1; // left (check the orientation of your own matrix)
+      }
+    }
+    if (movement_button_edge.out[3]){ // io_button[4]
+      // clamp at 0 
+      if (|player_x_pos.q){
+        player_x_pos.d = player_x_pos.q - 1; // right (check the orientation of your own matrix)
+      }
+    }
+
+    
+    // update the flag 
+    if (|movement_button_edge.out | start_button_edge.out){
+       update_ram_flag.d = 1;
+    }
+    
+    // connect player location to RAM, set update as 0 initially
+    ram.player_x_pos = player_x_pos.q; 
+    ram.player_y_pos = player_y_pos.q;
+    ram.update = 0; 
     
     led_strip.update = 0; // do not refresh by default
     led_strip.clear = 0; // do not clear by default
     
     // connect reverser to led_strip 
     index_reverser.original_pixel_address = led_strip.pixel_address;
-    index_reverser.writer_pixel_done = led_strip.next_pixel;
-    index_reverser.activate = matrix_used.q;
+    index_reverser.activate = 1; // we use led matrix here as example, always activate index reverser
     
     ram.address = 0; 
 
     // use io_dip[2:0]  to encode 12 unique pixel values at most (24 bits)
     case (state.q){
-      state.IDLE:
+      state.UPDATE_RAM:
              // when ram is ready, and led is idling at RESET state, we load the strip
-             if (latch_button_edge.out & ram.ready & led_strip.reset){
-                state.d = state.LOAD;
+             if (ram.ready & led_strip.reset){
+                // clear flag 
+                update_ram_flag.d = 0;
+                state.d = state.REFRESH;
                 ram.address = index_reverser.effective_pixel_address;
                 led_strip.update = 1;
               }
-             if (clear_button_edge.out){
-                 led_strip.clear = 1;
-              }
+        
+        led[1:0] = b10;
       
-      state.LOAD:
+      state.REFRESH:
             // if at the last FPGA clock cycle for this bit, advance the address first because our RAM needs 1 additional clock cycle to work
             if (led_strip.next_pixel){
               index_reverser.original_pixel_address = led_strip.pixel_address + 1;
@@ -113,21 +152,31 @@ module au_top (
             if (led_strip.done){
                 state.d = state.IDLE;
             }
-    }
+            led[1:0] = b11;
+        
+     state.IDLE:
+        if (update_ram_flag.q){ // if there's movement update or start button pressed
+            state.d = state.UPDATE_RAM;
+            ram.update = 1;  // send update signal to ram first, dont clear the update flag yet 
+        }
+        led[1:0] = b01;
 
+        // test reverser 
+        index_reverser.original_pixel_address = ram.debug_address_pointer;
+        
+    }
+    
     led_strip.color = LEDCOLOR[ram.out_encoding]; 
     outled = led_strip.led;
     
     // debug 
-    io_led[0] = index_reverser.effective_pixel_address;
-    io_led[1] = led_strip.pixel_address;
-    io_led[2] = ram.debug_rom_data;
-    
-    // show the current LED color
-    led[0] = matrix_used.q; 
-    led[7:1] = led_strip.pixel_address;
-    
-
+    io_led[0] = c{player_y_pos.q, player_x_pos.q};
+   
+    io_led[2] = ram.debug_address_pointer;
+    io_led[1] = index_reverser.effective_pixel_address;
+   
+    io_led[2][7] = update_ram_flag.q;
+    led[7:5] = ram.debug_data;
     
   }
 }
