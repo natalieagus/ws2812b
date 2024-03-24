@@ -8,44 +8,57 @@ Checkout the matrix-ram branch for implementation with RAM.
 
 ## ROM Usage
 
-Checkout the matrix-rom branch for implementation with ROM. This implementation cycles through a ROM automatically without latch-button.
+Checkout the matrix-rom branch for implementation with ROM. We use 8x8 WS281B led matrix as test case, and 8 entries of ROM automatically cycled through per ~1.7 seconds.
 
 ## Demo
 
-Upon compilation, connect the `DIN` pin of WS2812B to Br pin `C49`, as defined in the constraint file:
+### `matrix-rom` branch outcome
+
+This demo should be done on an 8x8 LED matrix. Please adjust `const ROM` accordingly:
 
 ```
-pin outled C49;
-```
-
-You should observe **24** LEDs in the strip lit up in the following color. If your strip is just of length `N`, then you shall see only the first `N` colors.
-
-```
-  (connector) WHITE WHITE BLUE WHITE RED WHITE GREEN WHITE WHITE BLUE BLUE BLUE (end of strip)
-```
-
-You can use `io_dip` to **color encode** 16 pixels and then by pressing `io_button[0]` (up button) on io shield to **register** and see the effect on the LED strip. For instance, if your dip switches is put as follows (left to right):
-
-```
-11110000 01011010 00001100
-```
-
-The value of `io_dip[2]` will be concatenated twice at the end to form 32 bit input (you can see this at `au_top`):
-
-```
-temp_encoding.d = 16x{c{io_dip[2], io_dip[2], io_dip[1], io_dip[0]}};
-```
-
-For instance, the above setup yields the following to be loaded to the LED strip:
+  // TEST case: for 8x8 matrix, needs 64x2 bits = 128 bits
+  // every row will display the SAME thing
+  // modify the ROM rows to be `128b` instead of `16b` if you want 8 different rows per cycle
+  // for simplicity, the sample below only dictate what each row color should be
+  // The ROM consist of 8 different color sets, the LED matrix strip will cycle through these
+  const ROM = {
+    16b0000000011111111, // green green green green white white white white
+    16b0101010110101010,
+    16b1110000110100000,
+    16b1111111111111111,
+    16b0000000000000000,
+    16b0101010101010101,
+    16b1010101010101010,
+    16b0001101100011011 //  green, red, blue, white, green, red, blue, white (repeat each row)
+  };
 
 ```
-11110000 11110000 01011010 00001100
+
+Your matrix LED should show the ROM outcome, cycled through 8 different outcomes in total.
+
+### `master` branch outcome
+
+Upon compilation, connect the `DIN` pin of WS2812B to Br pin `c40`, as defined in the constraint file:
+
+```
+pin outled c40;
 ```
 
-It will light up the LED in this color:
+You should observe **8** LEDs in the strip lit up in the following color. If your strip is just of length `N`, then you shall see only the first `N` colors.
+
+It is initialised to:
 
 ```
-  (connector) GREEN WHITE GREEN GREEN BLUE BLUE RED RED GREEN GREEN WHITE WHITE GREEN GREEN WHITE WHITE (end of strip)
+  dff led_encoding[PIXEL_COUNT*$clog2(ENCODING_AMOUNT)](.clk(clk), .rst(rst), #INIT(ROW_DIMENSIONx{16hABCD}));
+```
+
+The color we will get is:
+
+```
+ABCD: 1010 1011 1100 1101
+
+(start of connector) RED WHITE GREEN WHITE WHITE BLUE BLUE BLUE (end of strip)
 ```
 
 This is due to this encoding:
@@ -53,6 +66,30 @@ This is due to this encoding:
 ```
   // WHITE (11), BLUE (10), RED (01), GREEN (00)
   const LEDCOLOR = {24hFFFFFF, 24hFF0000, 24h00FF00, 24h0000FF};
+```
+
+You can use `io_dip[1:0]` to **color encode** 8 pixels and then by pressing `io_button[0]` (up button) on io shield to **register** and see the effect on the LED strip. For instance, if your dip switches is put as follows (left to right):
+
+```
+01011010 00001100
+```
+
+The value of `io_dip[1:0]` will be concatenated to form 16 bit input (you can see this at `au_top`):
+
+```
+temp_encoding.d = ROW_DIEMSNIONx{c{io_dip[1], io_dip[0]}};
+```
+
+For instance, the above setup yields the following to be loaded to the LED strip:
+
+```
+01011010 00001100
+```
+
+It will light up the LED in this color:
+
+```
+  (start of connector) GREEN WHITE GREEN GREEN BLUE BLUE RED RED (end of strip)
 ```
 
 We basically segments the color encoding as dictated by `io_dip` in groups of two bits, e.g:
@@ -77,27 +114,20 @@ A matrix is essentially a long strip with reversed index every other odd row, so
 Hence we shall reverse the physical index accordingly every other row. This can be found at `reverser.luc`:
 
 ```
-    // check if we are a multiple of DIMENSION
-    // here in our example, we have column 0 to 15
-    // so each time the last four bit our pixel_address is 1111, we will reverse the row addressing
-    // when address turns 1111, we can't just change the encoding right away, we need to wait for it to finish loading first, all 24 bits sent
-    if  (&original_pixel_address[COLUMN_DIMENSION_BITS-1:0] & writer_pixel_done){
-      reverse.d = reverse.q + 1; // toggle the reverse flag, test 1
+// check odd or even row multiple of COLUMN_DIMENSION
+    if (original_pixel_address[COLUMN_DIMENSION_BITS]){
+      // flip
+      // we are at odd row multiple
+      reversed_pixel_address = original_pixel_address ^ c{HIGHER_BITSx{b0},COLUMN_DIMENSION_BITSx{b1}}; // higher bits stays the same
     }
-
-    if (reverse.q)
-    {
-       reversed_pixel_address = original_pixel_address ^ c{HIGHER_BITSx{b0},COLUMN_DIMENSION_BITSx{b1}}; // higher bits stays the same
-      // reversed_pixel_address = 0; // test color at 0 which is 11 --> white
-     }
-    else
-    {
+    else{
       reversed_pixel_address = original_pixel_address;
     }
 
+
 ```
 
-Then decide whether we reverse the original addresses or not:
+Then decide whether we reverse the original addresses or not (activated or not activated):
 
 ```
     if (activate){ // if we decide to flip the leftmost bit, we reverse every other row
@@ -115,9 +145,8 @@ And then finally in `au_top`, we simply use it and find the encoded bits as usua
 ```
     // connect reverser to led_strip
     index_reverser.original_pixel_address = led_strip.pixel_address;
-    index_reverser.writer_pixel_done = led_strip.next_pixel;
     index_reverser.activate = matrix_used.q;
-    encoded_pixel_address = index_reverser.effective_pixel_address;
+    encoded_pixel_address = index_reverser.effective_pixel_address * $clog2(ENCODING_AMOUNT);
 
     // led_strip.pixel_address will vary between 0000 to 1100
     // address 0 --> encoding bit 1:0
