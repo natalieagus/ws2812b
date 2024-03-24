@@ -2,49 +2,43 @@
 
 WS2812B is a intelligent control LED light source that the control circuit and RGB chip are integrated in a package of 5050 components. You The data transfer protocol use single **NZR** communication mode. This driver is written in [Lucid](https://alchitry.com/lucid) and is meant to be run on [Alchitry Au](https://www.sparkfun.com/products/16527) Boards + [Alchitry Br](https://www.sparkfun.com/products/16524) prototype element board.
 
+## RAM Usage
+
+Checkout the matrix-ram branch for implementation with RAM.
+
+## ROM Usage
+
+Checkout the matrix-rom branch for implementation with ROM. We use 8x8 WS281B led matrix as test case, and 8 entries of ROM automatically cycled through per ~1.7 seconds.
+
 ## Demo
-
-Upon compilation, connect the `DIN` pin of WS2812B to Br pin `C49`, as defined in the constraint file:
-
-```
-pin outled C49;
-```
 
 ### `matrix-ram` branch outcome
 
 This demo should be done on an 8x8 LED matrix
 You should press `io_button[1]` to start, and you can move the "player" using the other 4 `io_button`.
 
-### `master` Branch Outcome
+### `master` branch outcome
 
-You should observe **24** LEDs in the strip lit up in the following color. If your strip is just of length `N`, then you shall see only the first `N` colors.
-
-```
-  (connector) WHITE WHITE BLUE WHITE RED WHITE GREEN WHITE WHITE BLUE BLUE BLUE (end of strip)
-```
-
-You can use `io_dip` to **color encode** 16 pixels and then by pressing `io_button[0]` (up button) on io shield to **register** and see the effect on the LED strip. For instance, if your dip switches is put as follows (left to right):
+Upon compilation, connect the `DIN` pin of WS2812B to Br pin `c40`, as defined in the constraint file:
 
 ```
-11110000 01011010 00001100
+pin outled c40;
 ```
 
-The value of `io_dip[2]` will be concatenated twice at the end to form 32 bit input (you can see this at `au_top`):
+You should observe **8** LEDs in the strip lit up in the following color. If your strip is just of length `N`, then you shall see only the first `N` colors.
+
+It is initialised to:
 
 ```
-temp_encoding.d = 16x{c{io_dip[2], io_dip[2], io_dip[1], io_dip[0]}};
+  dff led_encoding[PIXEL_COUNT*$clog2(ENCODING_AMOUNT)](.clk(clk), .rst(rst), #INIT(ROW_DIMENSIONx{16hABCD}));
 ```
 
-For instance, the above setup yields the following to be loaded to the LED strip:
+The color we will get is:
 
 ```
-11110000 11110000 01011010 00001100
-```
+ABCD: 1010 1011 1100 1101
 
-It will light up the LED in this color:
-
-```
-  (connector) GREEN WHITE GREEN GREEN BLUE BLUE RED RED GREEN GREEN WHITE WHITE GREEN GREEN WHITE WHITE (end of strip)
+(start of connector) RED WHITE GREEN WHITE WHITE BLUE BLUE BLUE (end of strip)
 ```
 
 This is due to this encoding:
@@ -52,6 +46,30 @@ This is due to this encoding:
 ```
   // WHITE (11), BLUE (10), RED (01), GREEN (00)
   const LEDCOLOR = {24hFFFFFF, 24hFF0000, 24h00FF00, 24h0000FF};
+```
+
+You can use `io_dip[1:0]` to **color encode** 8 pixels and then by pressing `io_button[0]` (up button) on io shield to **register** and see the effect on the LED strip. For instance, if your dip switches is put as follows (left to right):
+
+```
+01011010 00001100
+```
+
+The value of `io_dip[1:0]` will be concatenated to form 16 bit input (you can see this at `au_top`):
+
+```
+temp_encoding.d = ROW_DIEMSNIONx{c{io_dip[1], io_dip[0]}};
+```
+
+For instance, the above setup yields the following to be loaded to the LED strip:
+
+```
+01011010 00001100
+```
+
+It will light up the LED in this color:
+
+```
+  (start of connector) GREEN WHITE GREEN GREEN BLUE BLUE RED RED (end of strip)
 ```
 
 We basically segments the color encoding as dictated by `io_dip` in groups of two bits, e.g:
@@ -76,27 +94,20 @@ A matrix is essentially a long strip with reversed index every other odd row, so
 Hence we shall reverse the physical index accordingly every other row. This can be found at `reverser.luc`:
 
 ```
-    // check if we are a multiple of DIMENSION
-    // here in our example, we have column 0 to 15
-    // so each time the last four bit our pixel_address is 1111, we will reverse the row addressing
-    // when address turns 1111, we can't just change the encoding right away, we need to wait for it to finish loading first, all 24 bits sent
-    if  (&original_pixel_address[COLUMN_DIMENSION_BITS-1:0] & writer_pixel_done){
-      reverse.d = reverse.q + 1; // toggle the reverse flag, test 1
+// check odd or even row multiple of COLUMN_DIMENSION
+    if (original_pixel_address[COLUMN_DIMENSION_BITS]){
+      // flip
+      // we are at odd row multiple
+      reversed_pixel_address = original_pixel_address ^ c{HIGHER_BITSx{b0},COLUMN_DIMENSION_BITSx{b1}}; // higher bits stays the same
     }
-
-    if (reverse.q)
-    {
-       reversed_pixel_address = original_pixel_address ^ c{HIGHER_BITSx{b0},COLUMN_DIMENSION_BITSx{b1}}; // higher bits stays the same
-      // reversed_pixel_address = 0; // test color at 0 which is 11 --> white
-     }
-    else
-    {
+    else{
       reversed_pixel_address = original_pixel_address;
     }
 
+
 ```
 
-Then decide whether we reverse the original addresses or not:
+Then decide whether we reverse the original addresses or not (activated or not activated):
 
 ```
     if (activate){ // if we decide to flip the leftmost bit, we reverse every other row
@@ -114,9 +125,8 @@ And then finally in `au_top`, we simply use it and find the encoded bits as usua
 ```
     // connect reverser to led_strip
     index_reverser.original_pixel_address = led_strip.pixel_address;
-    index_reverser.writer_pixel_done = led_strip.next_pixel;
     index_reverser.activate = matrix_used.q;
-    encoded_pixel_address = index_reverser.effective_pixel_address;
+    encoded_pixel_address = index_reverser.effective_pixel_address * $clog2(ENCODING_AMOUNT);
 
     // led_strip.pixel_address will vary between 0000 to 1100
     // address 0 --> encoding bit 1:0
