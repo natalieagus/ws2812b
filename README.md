@@ -18,20 +18,20 @@ This demo should be done on an 8x8 LED matrix. Please adjust `const ROM` accordi
 
 ```
   // TEST case: for 8x8 matrix, needs 64x2 bits = 128 bits
-  // every row will display the SAME thing
-  // modify the ROM rows to be `128b` instead of `16b` if you want 8 different rows per cycle
-  // for simplicity, the sample below only dictate what each row color should be
+  // every row will display the same thing
+  // only dictate what each row color should be
   // The ROM consist of 8 different color sets, the LED matrix strip will cycle through these
   const ROM = {
-    16b0000000011111111, // green green green green white white white white
+    16b0000000011111111, // (end) green green green green white white white white (start of connector)
     16b0101010110101010,
     16b1110000110100000,
-    16b1111111111111111,
-    16b0000000000000000,
+    16b1111111111111111, // all white
+    16b0000000000000000, // all green
     16b0101010101010101,
     16b1010101010101010,
-    16b0001101100011011 //  green, red, blue, white, green, red, blue, white (repeat each row)
+    16b0001101100011011 //  (end) green, red, blue, white, green, red, blue, white (start of connector) (repeat each row)
   };
+
 
 ```
 
