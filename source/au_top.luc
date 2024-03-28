@@ -34,11 +34,11 @@ module au_top (
   // (connector) RED WHITE GREEN WHITE WHITE BLUE BLUE BLUE (end of strip)
   // another e.g: E is 1110 ---> 10 first (BLUE) then 11 (WHITE)
   // TODO: change this to suit your dimension
-  dff led_encoding[PIXEL_COUNT*$clog2(ENCODING_AMOUNT)](.clk(clk), .rst(rst), #INIT(ROW_DIMENSIONx{16hABCD})); // 2 bit to encode a color per pixel
-  dff temp_encoding[PIXEL_COUNT*$clog2(ENCODING_AMOUNT)](.clk(clk), .rst(rst), #INIT(0)); // holds temporary value (double buffering)
+  dff led_encoding[PIXEL_COUNT*$clog2(ENCODING_AMOUNT)](.clk(clk), .rst(rst), #INIT(0)); // 2 bit to encode a color per pixel
+  dff temp_encoding[PIXEL_COUNT*$clog2(ENCODING_AMOUNT)](.clk(clk), .rst(rst), #INIT(ROW_DIMENSIONx{16hABCD})); // holds temporary value (double buffering)
   
   ws2812b_writer led_strip(#PIXEL_COUNT(PIXEL_COUNT), .clk(clk), .rst(rst)); 
-  fsm state(.clk(clk), .rst(rst)) = {IDLE, LOAD};
+  fsm state(.clk(clk), .rst(rst)) = {INIT, LOAD, IDLE};
   
   reverser index_reverser(#COLUMN_DIMENSION(COLUMN_DIMENSION), #ROW_DIMENSION(ROW_DIMENSION));
   
@@ -57,6 +57,7 @@ module au_top (
     // The reset conditioner is used to synchronize the reset signal to the FPGA
     // clock. This ensures the entire FPGA comes out of reset at the same time.
     reset_conditioner reset_cond;
+    counter delay(.rst(rst), #DIV(25));
   }
   
   always {
@@ -100,6 +101,11 @@ module au_top (
                  led_strip.clear = 1;
               }
       
+      state.INIT: 
+           if (led_strip.reset & delay.value){ //  you need to artificially introduce some delay before sending data to the LED strip
+               state.d = state.LOAD;
+           }
+        
       state.LOAD:
             // wait until we are at RESET state before we decide to refresh the screen
             if (led_strip.reset){
