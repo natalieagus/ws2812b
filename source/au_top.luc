@@ -19,8 +19,8 @@ module au_top (
   const PIXEL_COUNT = COLUMN_DIMENSION *  ROW_DIMENSION;   
   const ENCODING_AMOUNT = 4; // how many different encodings are used? As example, we use 4
   
-  // WHITE (11), BLUE (10), RED (01), GREEN (00)
-  const LEDCOLOR = {24hFFFFFF, 24hFF0000, 24h00FF00, 24h0000FF}; 
+  // WHITE (11), BLUE (10), RED (01), OFF (00)
+  const LEDCOLOR = {24hFFFFFF, 24hFF0000, 24h00FF00, 24h000000}; 
   
   sig rst; // reset signal
   sig encoded_pixel_address[$clog2(PIXEL_COUNT)*$clog2(ENCODING_AMOUNT)];
@@ -28,9 +28,12 @@ module au_top (
 
   var index;
 
+  // dff initialisation done in FSM for more reliability 
+  // sometimes #INIT in here is not registered, especially for large dffs
+  // tried: #INIT of player_position works, but not consumable_position
   dff led_encoding[PIXEL_COUNT*$clog2(ENCODING_AMOUNT)](.clk(clk), .rst(rst), #INIT(0)); // 2 bit to encode a color per pixel
-  dff consumable_position[PIXEL_COUNT*$clog2(ENCODING_AMOUNT)](.clk(clk), .rst(rst), #INIT(48h000000000002)); // place blue at pixel position 0, remember that each pixel takes 2 bits 
-  dff player_position[PIXEL_COUNT*$clog2(ENCODING_AMOUNT)](.clk(clk), .rst(rst), #INIT(48h000000000100)); 
+  dff consumable_position[PIXEL_COUNT*$clog2(ENCODING_AMOUNT)](.clk(clk), .rst(rst), #INIT(0)); // place blue at pixel position 0, remember that each pixel takes 2 bits 
+  dff player_position[PIXEL_COUNT*$clog2(ENCODING_AMOUNT)](.clk(clk), .rst(rst), #INIT(0)); 
   dff direction(.clk(clk), .rst(rst), #INIT(1)); // 1 direction means to increase pixel index, 0 means to decrease pixel index
   
   ws2812b_writer led_strip(#PIXEL_COUNT(PIXEL_COUNT), .clk(clk), .rst(rst)); 
@@ -39,14 +42,15 @@ module au_top (
   // user inputs 
   button_conditioner reverse_button(.clk(clk));
   edge_detector reverse_button_edge(.clk(clk), #RISE(1), #FALL(0));
+  edge_detector delay_edge(.clk(clk), #RISE(1), #FALL(0));
   
-  reverser index_reverser;
+  reverser index_reverser(#COLUMN_DIMENSION(COLUMN_DIMENSION), #ROW_DIMENSION(ROW_DIMENSION), #ENCODING_AMOUNT(ENCODING_AMOUNT));
   
   .clk(clk) {
     // The reset conditioner is used to synchronize the reset signal to the FPGA
     // clock. This ensures the entire FPGA comes out of reset at the same time.
     reset_conditioner reset_cond;
-    counter delay(.rst(rst), #DIV(26));
+    counter delay(.rst(rst), #DIV(26), #SIZE(1));
   }
   
   always {
@@ -64,6 +68,7 @@ module au_top (
     
     reverse_button.in = io_button[1]; // use this button to enable reverse direction of player position
     reverse_button_edge.in = reverse_button.out;
+    delay_edge.in = delay.value;
     
     led_strip.update = 0; // do not refresh by default
     led_strip.clear = 0; // do not clear by default
@@ -76,11 +81,11 @@ module au_top (
     // use io_dip[1:0]  to encode 8 unique pixel values
     case (state.q){
       state.IDLE:
-             if (delay.value){
-                   if (direction.q){
+            if (delay_edge.out){
+            if (direction.q){
             // check if player is at the 24th position, if yes, reset to position 0
             if (player_position.q[46]){
-              player_position.d = player_position.q >> (COLUMN_DIMENSION-2)*2;
+              player_position.d = player_position.q >> (COLUMN_DIMENSION-1)*2;
             }
             else{
                       // increase player position regularly
@@ -90,7 +95,7 @@ module au_top (
           else{
             // check if player is at the 0th position 
             if (player_position.q[0]){
-              player_position.d = player_position.q << (COLUMN_DIMENSION-2)*2;
+              player_position.d = player_position.q << (COLUMN_DIMENSION-1)*2;
             }
             else{
                // decrease player position 
@@ -104,6 +109,8 @@ module au_top (
       state.INIT: 
            if (led_strip.reset & delay.value){ //  you need to artificially introduce some delay before sending data to the LED strip
                state.d = state.LOAD;
+               consumable_position.d = 48b10;
+               player_position.d = 48h400000000000;
            }
         
       state.LOAD:
@@ -132,9 +139,37 @@ module au_top (
     
     // debug 
     // show the current LED color
+    if (io_dip[0][0]){
     io_led[0] = led_encoding.q[7:0];
     io_led[1] = led_encoding.q[15:8];
     io_led[2] = led_encoding.q[23:16];
+    }
+    if (io_dip[0][1]){
+    io_led[0] = led_encoding.q[31:24];
+    io_led[1] = led_encoding.q[39:32];
+    io_led[2] = led_encoding.q[47:40];    
+    }
+    if (io_dip[0][2]){
+    io_led[0] = player_position.q[7:0];
+    io_led[1] = player_position.q[15:8];
+    io_led[2] = player_position.q[23:16];
+    }
+    if(io_dip[0][3]){
+    io_led[0] = player_position.q[31:24];
+    io_led[1] = player_position.q[39:32];
+    io_led[2] = player_position.q[47:40];    
+    }
+    if (io_dip[0][4]){
+    io_led[0] = consumable_position.q[7:0];
+    io_led[1] = consumable_position.q[15:8];
+    io_led[2] = consumable_position.q[23:16];    
+      
+    }
+    if(io_dip[0][5]){
+    io_led[0] = consumable_position.q[31:24];
+    io_led[1] = consumable_position.q[39:32];
+    io_led[2] = consumable_position.q[47:40];   
+    }
    
     led[0] = direction.q;
     led[7:1] = led_strip.pixel_address;

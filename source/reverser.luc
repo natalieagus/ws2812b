@@ -36,15 +36,22 @@ module reverser #(
   
   always {
     
+    reversed_pixel_address = original_pixel_address;
+    
+    // check if we have > 1 rows 
+    if (ROW_DIMENSION > 1){
     // check odd or even row multiple of COLUMN_DIMENSION
     if (original_pixel_address[COLUMN_DIMENSION_BITS]){
       // flip 
       // we are at odd row multiple
       reversed_pixel_address = original_pixel_address ^ c{HIGHER_BITSx{b0},COLUMN_DIMENSION_BITSx{b1}}; // higher bits stays the same 
     }
+    
     else{
       reversed_pixel_address = original_pixel_address;
     }
+    }
+    
     
     
     if (activate){ // if we decide to flip the leftmost bit, we reverse every other row
